@@ -1,1 +1,73 @@
+import pandas as pd
+from pandas.tseries.offsets import DateOffset
+from statsmodels.tsa.stattools import adfuller
+import statsmodels.api as sm
+from statsmodels.graphics.tsaplots import plot_acf,plot_pacf
+from statsmodels.tsa.arima_model import ARIMA
+import seaborn as sns
+import matplotlib.pyplot as plt
 
+df=pd.read_csv('D:/python/Time Series Analysis/monthly-milk-production-pounds-p.csv')
+df.head()
+df.isnull().sum()
+df.drop(168,axis=0,inplace=True)
+df.columns=['Months','Production']
+df['Months']=pd.to_datetime(df['Months'])
+df.set_index('Months',inplace=True)
+df.describe().transpose()
+series=df['Production']
+
+
+df.plot()
+t=sm.tsa.seasonal_decompose(df)
+t.plot()
+
+series.rolling(12).mean().plot()
+series.plot()
+
+results=adfuller(df['Production'])
+
+def fuller(prod):
+    results=adfuller(prod)
+    values=['Test Statistic','p-value','Lags used','No.of Observations used']
+    for result,value in zip(results,values):
+        print(value+' : '+str(result))
+    if results[1]>=0.05:
+        print('Unit root found, non stationary')
+    else:
+        print('No unit root found, stationary')
+fuller(df['Production'])
+
+#Differencing
+#this dataset has both trend and seasonality, so we will need to remove both of them, trend is removed by shifting 1
+# seasonality still exists after 12 months, therefore, second order differencing is required
+df['Difference in production']=df['Production']-df['Production'].shift(1)
+fuller(df['Difference in production'].dropna()) #stationary
+t=sm.tsa.seasonal_decompose(df['Difference in production'].dropna())
+t.plot()
+
+df['Seasonal First Difference']=df['Production']-df['Production'].shift(12)
+fuller(df['Seasonal First Difference'].dropna()) #still not stationary
+
+#second order differencing to make seasonality stationary
+df['Second Difference']=df['Seasonal First Difference']-df['Seasonal First Difference'].shift(1)
+fuller(df['Second Difference'].dropna())
+
+fig=plt.figure()
+ax1=fig.add_subplot(211)
+fig=plot_acf(df['Second Difference'].dropna(),lags=40,ax=ax1)
+ax2=fig.add_subplot(212)
+fig=plot_pacf(df['Second Difference'].dropna(),lags=40,ax=ax2)
+
+model=sm.tsa.statespace.SARIMAX(df['Production'],order=(1,1,1),seasonal_order=(1,1,1,12))
+model_fit=model.fit()
+model_fit.summary()
+
+df['Forecast']=model_fit.predict(start=150,end=165,dynamic=True)
+df[['Production','Forecast']].plot()
+
+future_dates=[df.index[-1]+DateOffset(months=x) for x in range(0,24)]
+future_dates_df=pd.DataFrame(index=future_dates,columns=df.columns)
+df=pd.concat([df,future_dates_df])
+df['FutureForecast']=model_fit.predict(start=167,end=190,dynamic=True)
+df[['Production','FutureForecast']].plot()
